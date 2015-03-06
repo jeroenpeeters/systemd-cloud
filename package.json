@@ -1,0 +1,22 @@
+{
+  "name": "systemd-cloud",
+  "version": "0.0.0",
+  "description": "",
+  "scripts": {
+    "start": "node_modules/.bin/coffee main.coffee --nodejs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Jeroen Peeters",
+  "dependencies": {
+    "coffee-script": "~1.9.1",
+    "redis": "~0.12.1",
+    "node-uuid": "~1.4.2",
+    "express": "~4.12.0",
+    "simplesets": "~1.2.0",
+    "body-parser": "~1.12.0",
+    "extend": "~2.0.0",
+    "request": "~2.53.0",
+    "js-yaml": "~3.2.7",
+    "handlebars": "~3.0.0"
+  }
+}
