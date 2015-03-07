@@ -1,1 +1,24 @@
-hoi {{name}}
+[Unit]
+Description=Unit for {{name}}@{{project}}-{{instance}}.service
+Requires=docker.service
+PartOf=main@{{project}}-{{instance}}.service
+
+{{#each links}}
+BindsTo={{this}}@{{../project}}-{{../instance}}.service"
+After={{this}}@{{../project}}-{{../instance}}.service"
+{{/each}}
+
+[Service]
+TimeoutStartSec=0
+TimeoutStopSec=25
+EnvironmentFile=/etc/environment"
+ExecStartPre=-/usr/bin/docker kill {{name}}-{{project}}-{{instance}}
+ExecStartPre=-/usr/bin/docker rm {{name}}-{{project}}-{{instance}}
+ExecStartPre=/usr/bin/docker pull {{image}}
+
+ExecStartPre=/usr/bin/etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/state activating
+{{#each links}}
+ExecStartPre=/usr/bin/bash -c "while [ -z \\"\\$(docker ps | grep {{this}}-{{../project}}-{{../instance}}\\" ]; do sleep 5; done"
+{{/each}}
+ExecStart=/usr/bin/docker run --rm --name {{name}}-{{project}}-{{instance}} {{linkage}}$volumestr$volumesfromstr$opts -v /usr/share/zoneinfo/localtime:/etc/localtime:ro -P {{image}} {{args}}
+ExecStop=/usr/bin/docker stop -t 30 {{name}}-{{project}}-{{instance}}

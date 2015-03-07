@@ -11,7 +11,7 @@ request       = require 'request'
 
 _randomNum = (max,min=0) -> Math.floor(Math.random() * (max - min) + min)
 
-module.exports = (http_port, redisHost, redisPort, workerApi, execRunner, execHost) ->
+module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
 
   workerId = workerApi#uuid.v4()
@@ -67,7 +67,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner, execHo
       if job.targetWorker == workerId
         x -= 1
         stateKey = "/instance/#{job.itemOfWork.id}"
-        redis.mergeObject stateKey, {state: 'loading', workerId: workerId, execHost: execHost}
+        redis.mergeObject stateKey, {state: 'loading', workerId: workerId}
         console.log 'Job received', job
         child_process.exec "#{execRunner} \"#{job.itemOfWork.work.cmd}\"", (err, stdout, stderr) ->
           console.log 'work done: ', err, stdout, stderr
@@ -76,7 +76,8 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner, execHo
     'stop': (job) ->
       if job.workerId == workerId
         redis.mergeObject "/instance/#{job.itemOfWork.id}", {state: 'stopping'}
-        child_process.exec "#{execRunner} \"echo stop;sleep 10;echo stopped;\"", (err, stdout, stderr) ->
+        console.log "stop -> #{execRunner} \"cd #{job.itemOfWork.project}-#{job.itemOfWork.instance} && ./stop.sh\""
+        child_process.exec "#{execRunner} \"cd #{job.itemOfWork.project}-#{job.itemOfWork.instance} && ./stop.sh\"", (err, stdout, stderr) ->
           redis.del "/instance/#{job.itemOfWork.id}"
 
 
@@ -148,7 +149,10 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner, execHo
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: 'echo hello;sleep 10;echo world;'
     newAuction itemOfWork, (err, auction, winnerId) ->
       res.json error: err if err
-      res.json {auctionId: auction.id, winnerId: winnerId} if !err
+      if !err
+        res.json auctionId: auction.id, winnerId: winnerId, endpoints:
+          state: "http://#{workerId}/app-state/#{req.params.project}/#{req.params.instance}"
+          stop: "http://#{workerId}/stop-app/#{req.params.project}/#{req.params.instance}"
 
   app.post '/start-app/:project/:instance', (req, res) ->
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: req.body
@@ -165,16 +169,25 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner, execHo
         redis.publishObject 'stop', state
         res.json {ok:'ok'}
 
-  app.get '/app-file/:project/:instance', (req, res) ->
+  app.get '/app-file/:project/:instance/:service', (req, res) ->
     console.log req.params.project, req.params.instance, req.query.path
     redis.getObject "/instance/#{req.params.project}/#{req.params.instance}", (err, state)->
       res.json {error: err} if err
       res.json {error: "No such instance"} if !err and state is null
-      res.json {ok:workerId} if state and state.workerId == workerId
+      if state and state.workerId == workerId
+        child_process.exec "#{execRunner} \"docker exec #{req.params.service}-#{req.params.project}-#{req.params.instance} cat #{req.query.path}\"", (err, stdout, stderr) ->
+          res.send stderr if err
+          res.send stdout if !err
       if state and state.workerId != workerId
-        console.log 'not mine, piping to', state.workerId
-        request.get("http://#{state.workerId}/app-file/#{req.params.project}/#{req.params.instance}?path=#{req.query.path}")
+        request.get("http://#{state.workerId}/app-file/#{req.params.project}/#{req.params.instance}/#{req.params.service}?path=#{req.query.path}")
         .pipe(res)
+
+  app.get '/worker-info', (req, res) ->
+    res.json
+      workerId: workerId
+      redisHost: "#{redisHost}:#{redisPort}"
+      execRunner: execRunner
+      clusterNodes: workerSet.array()
 
   server = app.listen http_port, ->
     host = server.address().address

@@ -1,7 +1,8 @@
-FROM centos:centos6
+FROM ubuntu
 
-RUN rpm -Uvh http://download.fedoraproject.org/pub/epel/6/i386/epel-release-6-8.noarch.rpm
-RUN yum install -y npm
+RUN apt-get update
+RUN apt-get install -y nodejs npm
+RUN ln -s /usr/bin/nodejs /usr/bin/node
 
 COPY . /src
 
