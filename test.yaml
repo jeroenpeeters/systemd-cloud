@@ -6,8 +6,12 @@ www:
   opts:       -e DB_HOST=testwiki.lrk.org -e DB_USER={{user}} -e DB_PASSWORD={{password}} -e DB_DATABASE=trr
   links:
     - db
-  volumes:    /var/www/releaseman/current /another/volume:volatile
-  volumes-from: db
+  volumes:
+    - /var/www/releaseman/current
+    - /another/volume:volatile
+
+  volumes-from:
+    - db
 
 # dit is de db
 db:

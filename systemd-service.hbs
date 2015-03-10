@@ -20,5 +20,5 @@ ExecStartPre=/usr/bin/etcdctl --peers http://docker1.rni.org:4001 set /instances
 {{#each links}}
 ExecStartPre=/usr/bin/bash -c "while [ -z \\"\\$(docker ps | grep {{this}}-{{../project}}-{{../instance}}\\" ]; do sleep 5; done"
 {{/each}}
-ExecStart=/usr/bin/docker run --rm --name {{name}}-{{project}}-{{instance}} {{linkage}}$volumestr$volumesfromstr$opts -v /usr/share/zoneinfo/localtime:/etc/localtime:ro -P {{image}} {{args}}
+ExecStart=/usr/bin/docker run --rm --name {{name}}-{{project}}-{{instance}} {{linkage}}$volumestr{{volumesfrom}}{{opts}} -v /usr/share/zoneinfo/localtime:/etc/localtime:ro -P {{image}} {{args}}
 ExecStop=/usr/bin/docker stop -t 30 {{name}}-{{project}}-{{instance}}
