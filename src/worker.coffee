@@ -8,6 +8,10 @@ express       = require 'express'
 bodyParser    = require 'body-parser'
 request       = require 'request'
 
+r = require('rethinkdbdash')(host:'10.19.88.14', port: 28015, db: 'appcluster')
+#r.connect host:'10.19.88.14', port: 28015, db: 'appcluster'
+r.table('data').run().then (result)->
+  console.log 'rethinkdb result!!!', result
 
 _randomNum = (max,min=0) -> Math.floor(Math.random() * (max - min) + min)
 
@@ -29,6 +33,11 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
       @setObject prop, extend value, object if value
     exists: (prop, cb) -> @props.exists prop, cb
     del: (prop) -> @props.del prop
+    waitFor: (key, cb) ->
+      wait = redis_.createClient redisPort, redisHost
+      wait.brpop key, 0, (err, value) ->
+        wait.end()
+        cb err, value
 
   x = 100
 
@@ -105,10 +114,8 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
         redis.setObject stateKey, {'state': 'auctioning', itemOfWork: itemOfWork}
         myAuctions[auction.id] = extend {itemOfWork: itemOfWork, bids:new sets.Set()}, auction
         redis.publishObject 'auction', auction
-        wait = redis_.createClient redisPort, redisHost
-        wait.brpop "auction/#{auction.id}/winner", 0, (err, winnerId) ->
-          wait.end()
-          cb null, auction, winnerId[1]
+        redis.waitFor "auction/#{auction.id}/winner", (err, value) ->
+          cb null, auction, value[1]
       else
         cb "Instance already exists"
 

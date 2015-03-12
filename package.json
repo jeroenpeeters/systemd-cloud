@@ -17,6 +17,7 @@
     "extend": "~2.0.0",
     "request": "~2.53.0",
     "js-yaml": "~3.2.7",
-    "handlebars": "~3.0.0"
+    "handlebars": "~3.0.0",
+    "rethinkdbdash": "~1.16.13"
   }
 }
