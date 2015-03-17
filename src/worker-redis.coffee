@@ -7,7 +7,17 @@ extend        = require 'extend'
 express       = require 'express'
 bodyParser    = require 'body-parser'
 request       = require 'request'
-rethinkdbdash = require 'rethinkdbdash'
+
+repubsub      = require './repubsub'
+r = require('rethinkdbdash')(host:'10.19.88.15', port: 28015, db: 'appcluster')
+exchange = new repubsub.Exchange 'clusterExchange', {host:'10.19.88.15', port: 28015, db: 'pubsub'}
+
+auctionQueue = exchange.queue (topic) -> topic.match 'auction'
+auctionQueue.subscribe (topic, message) ->
+  console.log 'recv:', topic, message, message.object
+
+auctionTopic = exchange.topic 'auction'
+auctionTopic.publish {object: "an object", x:1}
 
 #r.connect host:'10.19.88.14', port: 28015, db: 'appcluster'
 #r.table('data').run().then (result)->
@@ -19,62 +29,24 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
   workerId = workerApi
 
-  db =
-    r:        rethinkdbdash {host: redisHost, port: redisPort, db: 'appcluster'}
-    newval:   (key) -> @r.row('new_val') key
-    nodes:    -> @r.table 'nodes'
-    work:     -> @r.table 'work'
-    bids:     -> @r.table 'bids'
-
-    registerNode: (endpoint) ->
-      @nodes().filter({endpoint: endpoint}).delete().then => @nodes().insert({endpoint: endpoint}).run()
-
-    unregisterNode: (endpoint, cb) ->
-      @nodes().filter({endpoint: endpoint}).delete().then -> cb() if cb
-
-    nodeCount: (cb) ->
-      @nodes().count().then cb
-
-    newWork: (itemOfWork, cb) ->
-      @work().insert({arbiter: workerId, state: 'auctioning', itemOfWork: itemOfWork, bids: []})
-        .then (stat)-> cb stat.generated_keys[0] if cb
-
-    updateWork: (value) ->
-      @work().update(value).run()
-
-    newBid: (bid, arbiter, workId, workerId) ->
-      @bids().insert({bid: bid, arbiter: arbiter, workId: workId, workerId: workerId}).run()
-
-    listenForNewWork: (cb) ->
-      @work().changes()
-        .filter @newval('state').eq('auctioning')
-        #.filter (work) -> work('new_val')('bids').contains((bid) -> bid('workerId').eq(workerId)).not()
-        .then (cursor) -> cursor.each (_, value) -> cb value.new_val
-        .error console.log
-
-    listenForBids: (workerId, cb) ->
-      @bids().changes().filter @newval('arbiter').eq(workerId)
-        .then (cursor) -> cursor.each (_, value) -> cb value.new_val
-        .error console.log
-
-
-  db.listenForNewWork (value) ->
-    console.log 'new work:', value
-    db.newBid x, value.arbiter, value.id, workerId
-    #value.bids.push {workerId: workerId, bid: x}
-    #db.updateWork value
-
-  myWork = {}
-  db.listenForBids workerId, (bid) ->
-    console.log "bid on work #{bid.workId}", bid
-    myWork[bid.workId] = new sets.Set() if not myWork[bid.workId]
-    myWork[bid.workId].add bid
-    if myWork[bid.workId].size() == workerSet.size()
-      winningBid = selectWinningBid auction.bids
-      console.log "all bids received for #{auction.id}, winner is #{winningBid.worker}"
-      redis.pub.rpush "auction/#{auction.id}/winner", winningBid.worker
-      redis.publishObject 'execute', {targetWorker: winningBid.worker, itemOfWork: auction.itemOfWork}
-      delete myAuctions[auction.id]
+  redis =
+    sub: redis_.createClient redisPort, redisHost
+    pub: redis_.createClient redisPort, redisHost
+    props: redis_.createClient redisPort, redisHost
+    publishObject: (channel, object) -> @pub.publish channel, JSON.stringify object
+    subscribe: (channel) -> @sub.subscribe channel
+    onMessage: (cb) -> @sub.on 'message', cb
+    getObject: (prop, cb) -> @props.get prop, (err, value) -> if err then cb err else cb null, JSON.parse value
+    setObject: (prop, object) -> @props.set prop, JSON.stringify object
+    mergeObject: (prop, object) -> @getObject prop, (err, value) =>
+      @setObject prop, extend value, object if value
+    exists: (prop, cb) -> @props.exists prop, cb
+    del: (prop) -> @props.del prop
+    waitFor: (key, cb) ->
+      wait = redis_.createClient redisPort, redisHost
+      wait.brpop key, 0, (err, value) ->
+        wait.end()
+        cb err, value
 
   x = 100
 
@@ -129,22 +101,24 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
         child_process.exec "#{execRunner} \"cd #{job.itemOfWork.project}-#{job.itemOfWork.instance} && ./stop.sh\"", (err, stdout, stderr) ->
           redis.del "/instance/#{job.itemOfWork.id}"
 
+
+  redis.onMessage (channel, message) ->
+    if handlers[channel]
+      handlers[channel] JSON.parse message
+    else console.log "Unknown channel #{channel} with message", message
+
   onExit = (_ , exception)->
     console.log 'uncaughtException', exception if exception
-    db.unregisterNode workerApi, ->
-      process.exit()
+    redis.publishObject 'worker-left', id:workerId
+    process.exit()
 
   process.on 'SIGINT', onExit.bind null, exit:true
-  process.on 'uncaughtException', onExit.bind null, exit:true
+  #process.on 'uncaughtException', onExit.bind null, exit:true
 
   createItemOfWork = (project, instance, work) ->
     id: "#{project}/#{instance}", project: project, instance: instance, work: work
 
-  newWork = (itemOfWork, cb) ->
-    db.nodeCount (nodeCount) ->
-      db.newWork extend {expectedBids: nodeCount}, itemOfWork
-      cb "wooi"
-    ###
+  newAuction = (itemOfWork, cb) ->
     stateKey = "/instance/#{itemOfWork.id}"
     redis.exists stateKey, (err, exists) ->
       if !err and exists == 0
@@ -156,9 +130,21 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
           cb null, auction, value[1]
       else
         cb "Instance already exists"
-    ###
 
-  db.registerNode workerApi
+  anounceMyPresence = -> redis.publishObject 'presence-announcement', id:workerId
+
+  #
+  # Start the worker
+  #
+
+  redis.subscribe 'auction'
+  redis.subscribe 'worker-left'
+  redis.subscribe 'bid'
+  redis.subscribe 'presence-announcement'
+  redis.subscribe 'execute'
+  redis.subscribe 'stop'
+
+  anounceMyPresence()
   console.log "Simple CloudEngine v1.0 by @jeroenpeeters"
   console.log "Worker started, redisHost=#{redisHost}, redisPort=#{redisPort}, httpPort=#{http_port}, workerId=#{workerId}"
   console.log "ExecRunner:#{execRunner}"
@@ -180,7 +166,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
   app.get '/start-app/:project/:instance', (req, res) ->
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: 'echo hello;sleep 10;echo world;'
-    newWork itemOfWork, (err, auction, winnerId) ->
+    newAuction itemOfWork, (err, auction, winnerId) ->
       res.json error: err if err
       if !err
         res.json auctionId: auction.id, winnerId: winnerId, endpoints:
@@ -189,7 +175,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
   app.post '/start-app/:project/:instance', (req, res) ->
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: req.body
-    newWork itemOfWork, (err, auction, winnerId) ->
+    newAuction itemOfWork, (err, auction, winnerId) ->
       res.json error: err if err
       res.json {auctionId: auction.id, winnerId: winnerId} if !err
 
