@@ -22,6 +22,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
   db =
     r:        rethinkdbdash {host: redisHost, port: redisPort, db: 'appcluster'}
     newval:   (key) -> @r.row('new_val') key
+    oldval:   (key) -> @r.row('old_val') key
     nodes:    -> @r.table 'nodes'
     work:     -> @r.table 'work'
     bids:     -> @r.table 'bids'
@@ -36,8 +37,24 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
       @nodes().count().then cb
 
     newWork: (itemOfWork, cb) ->
-      @work().insert({arbiter: workerId, state: 'auctioning', itemOfWork: itemOfWork, bids: []})
+      @nodeCount (nodeCount) =>
+        @work().insert
+          auction:
+            arbiter: workerId
+            expectedBids: nodeCount
+            bids: []
+          itemOfWork: itemOfWork
+          state: 'auctioning'
         .then (stat)-> cb stat.generated_keys[0] if cb
+
+    removeWork: (id) ->
+      @work().get(id).delete().run()
+
+    findWork: (id, cb) ->
+      @work().get(id).then cb
+
+    findWorkByName: (project, instance, cb) ->
+      @work().filter(itemOfWork: {project: project, instance: instance}).then cb
 
     updateWork: (value) ->
       @work().update(value).run()
@@ -45,36 +62,44 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
     newBid: (bid, arbiter, workId, workerId) ->
       @bids().insert({bid: bid, arbiter: arbiter, workId: workId, workerId: workerId}).run()
 
+    deleteBidsForWork: (workId) ->
+      @bids().filter(workId: workId).delete().run()
+
     listenForNewWork: (cb) ->
       @work().changes()
+        .filter @r.row('old_val').eq(null)
         .filter @newval('state').eq('auctioning')
         #.filter (work) -> work('new_val')('bids').contains((bid) -> bid('workerId').eq(workerId)).not()
         .then (cursor) -> cursor.each (_, value) -> cb value.new_val
         .error console.log
 
     listenForBids: (workerId, cb) ->
-      @bids().changes().filter @newval('arbiter').eq(workerId)
+      @bids().changes().filter @r.row('old_val').eq(null)
+        .filter @newval('arbiter').eq(workerId)
         .then (cursor) -> cursor.each (_, value) -> cb value.new_val
         .error console.log
 
 
   db.listenForNewWork (value) ->
     console.log 'new work:', value
-    db.newBid x, value.arbiter, value.id, workerId
-    #value.bids.push {workerId: workerId, bid: x}
-    #db.updateWork value
+    db.newBid x, value.auction.arbiter, value.id, workerId
 
   myWork = {}
   db.listenForBids workerId, (bid) ->
     console.log "bid on work #{bid.workId}", bid
     myWork[bid.workId] = new sets.Set() if not myWork[bid.workId]
     myWork[bid.workId].add bid
-    if myWork[bid.workId].size() == workerSet.size()
-      winningBid = selectWinningBid auction.bids
-      console.log "all bids received for #{auction.id}, winner is #{winningBid.worker}"
-      redis.pub.rpush "auction/#{auction.id}/winner", winningBid.worker
-      redis.publishObject 'execute', {targetWorker: winningBid.worker, itemOfWork: auction.itemOfWork}
-      delete myAuctions[auction.id]
+    db.findWork bid.workId, (work) ->
+      if myWork[bid.workId] and myWork[work.id].size() == work.auction.expectedBids
+        winningBid = selectWinningBid myWork[bid.workId]
+        console.log "winningbid for work #{winningBid.workId}", winningBid
+        work.auction.bids = myWork[bid.workId].array()
+        work.auction.winningBid = winningBid
+        db.updateWork work
+        request.post "http://#{winningBid.workerId}/worker/execute", {json: true, body: work}
+
+        delete myWork[bid.workId]
+        db.deleteBidsForWork bid.workId
 
   x = 100
 
@@ -84,52 +109,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
   selectWinningBid = (bids) ->
     bids.array().reduce (prev, current) -> if prev == null || current.bid > prev.bid then current else prev
 
-  handlers =
-    'worker-left': (msg) ->
-      console.log "Worker left: #{msg.id}"
-      workerSet.remove msg.id
-    'presence-announcement': (msg) ->
-      anounceMyPresence() if not workerSet.has msg.id
-      prevSize = workerSet.size()
-      workerSet.add msg.id
-      console.log "Total workers: #{workerSet.size()}" if prevSize != workerSet.size()
-
-    'auction': (msg) ->
-      console.log 'auction received:', msg
-      x = 100 if x < 1
-      setTimeout ->
-        redis.publishObject 'bid', {auctionId: msg.id, worker: workerId, bid: x}
-      , 1000
-
-    'bid': (bid) ->
-      if myAuctions[bid.auctionId]
-        auction = myAuctions[bid.auctionId]
-        auction.bids.add bid
-        if auction.bids.size() == workerSet.size()
-          winningBid = selectWinningBid auction.bids
-          console.log "all bids received for #{auction.id}, winner is #{winningBid.worker}"
-          redis.pub.rpush "auction/#{auction.id}/winner", winningBid.worker
-          redis.publishObject 'execute', {targetWorker: winningBid.worker, itemOfWork: auction.itemOfWork}
-          delete myAuctions[auction.id]
-
-    'execute': (job) ->
-      if job.targetWorker == workerId
-        x -= 1
-        stateKey = "/instance/#{job.itemOfWork.id}"
-        redis.mergeObject stateKey, {state: 'loading', workerId: workerId}
-        console.log 'Job received', job
-        child_process.exec "#{execRunner} \"#{job.itemOfWork.work.cmd}\"", (err, stdout, stderr) ->
-          console.log 'work done: ', err, stdout, stderr
-          redis.mergeObject stateKey, {state: 'running'}
-
-    'stop': (job) ->
-      if job.workerId == workerId
-        redis.mergeObject "/instance/#{job.itemOfWork.id}", {state: 'stopping'}
-        console.log "stop -> #{execRunner} \"cd #{job.itemOfWork.project}-#{job.itemOfWork.instance} && ./stop.sh\""
-        child_process.exec "#{execRunner} \"cd #{job.itemOfWork.project}-#{job.itemOfWork.instance} && ./stop.sh\"", (err, stdout, stderr) ->
-          redis.del "/instance/#{job.itemOfWork.id}"
-
-  onExit = (_ , exception)->
+  onExit = (_, exception) ->
     console.log 'uncaughtException', exception if exception
     db.unregisterNode workerApi, ->
       process.exit()
@@ -138,25 +118,15 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
   process.on 'uncaughtException', onExit.bind null, exit:true
 
   createItemOfWork = (project, instance, work) ->
-    id: "#{project}/#{instance}", project: project, instance: instance, work: work
+    project: project, instance: instance, work: work
 
   newWork = (itemOfWork, cb) ->
-    db.nodeCount (nodeCount) ->
-      db.newWork extend {expectedBids: nodeCount}, itemOfWork
-      cb "wooi"
-    ###
-    stateKey = "/instance/#{itemOfWork.id}"
-    redis.exists stateKey, (err, exists) ->
-      if !err and exists == 0
-        auction = id: uuid.v4()
-        redis.setObject stateKey, {'state': 'auctioning', itemOfWork: itemOfWork}
-        myAuctions[auction.id] = extend {itemOfWork: itemOfWork, bids:new sets.Set()}, auction
-        redis.publishObject 'auction', auction
-        redis.waitFor "auction/#{auction.id}/winner", (err, value) ->
-          cb null, auction, value[1]
-      else
+    db.findWorkByName itemOfWork.project, itemOfWork.instance, (res) ->
+      if res.length > 0
         cb "Instance already exists"
-    ###
+      else
+        db.newWork itemOfWork
+        cb null, "wooi"
 
   db.registerNode workerApi
   console.log "Simple CloudEngine v1.0 by @jeroenpeeters"
@@ -172,20 +142,29 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
   app.use bodyParser.text()
   app.use bodyParser.json()
 
+  getEndpointsObject = (project, instance) ->
+    state: "http://#{workerId}/app-state/#{project}/#{instance}"
+    stop: "http://#{workerId}/stop-app/#{project}/#{instance}"
+
+  noSuchInstance = (req, res) ->
+    res.status(404).json error: "No such instance"
+
   app.get '/app-state/:project/:instance', (req, res) ->
-    redis.getObject "/instance/#{req.params.project}/#{req.params.instance}", (err, state)->
-      res.json {error: err} if err
-      res.json {error: "No such instance"} if !err and state is null
-      res.json state if state
+    db.findWorkByName req.params.project, req.params.instance, (result) ->
+      if result.length == 0
+        noSuchInstance req, res
+      else
+        res.json result[0]
 
   app.get '/start-app/:project/:instance', (req, res) ->
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: 'echo hello;sleep 10;echo world;'
     newWork itemOfWork, (err, auction, winnerId) ->
-      res.json error: err if err
-      if !err
+      if err
+        res.status(400).json error: err, endpoints:
+          getEndpointsObject req.params.project, req.params.instance
+      else
         res.json auctionId: auction.id, winnerId: winnerId, endpoints:
-          state: "http://#{workerId}/app-state/#{req.params.project}/#{req.params.instance}"
-          stop: "http://#{workerId}/stop-app/#{req.params.project}/#{req.params.instance}"
+          getEndpointsObject req.params.project, req.params.instance
 
   app.post '/start-app/:project/:instance', (req, res) ->
     itemOfWork = createItemOfWork req.params.project, req.params.instance, cmd: req.body
@@ -194,13 +173,22 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
       res.json {auctionId: auction.id, winnerId: winnerId} if !err
 
   app.get '/stop-app/:project/:instance', (req, res) ->
-    redis.getObject "/instance/#{req.params.project}/#{req.params.instance}", (err, state)->
-      res.json {error: err} if err
-      res.json {error: "No such instance"} if !err and state is null
-      res.json {error: "Instance cannot be stopped at current state"} if state && (!state.workerId || state.state != 'running')
-      if state && state.state == 'running'
-        redis.publishObject 'stop', state
-        res.json {ok:'ok'}
+    db.findWorkByName req.params.project, req.params.instance, (result) ->
+      if result.length == 0
+        noSuchInstance req, res
+      else
+        instance = result[0]
+        if instance.state == 'running'
+          if instance.auction.winningBid.workerId == workerId
+            console.log "stop -> #{execRunner} \"cd #{instance.itemOfWork.project}-#{instance.itemOfWork.instance} && ./stop.sh\""
+            child_process.exec "#{execRunner} \"cd #{instance.itemOfWork.project}-#{instance.itemOfWork.instance} && ./stop.sh\"", (err, stdout, stderr) ->
+              db.removeWork instance.id
+            res.json ok: 'true'
+          else
+            request.get("http://#{instance.auction.winningBid.workerId}/stop-app/#{req.params.project}/#{req.params.instance}")
+            .pipe(res)
+        else
+          res.status(400).json error: "Instance cannot be stopped at current state"
 
   app.get '/app-file/:project/:instance/:service', (req, res) ->
     console.log req.params.project, req.params.instance, req.query.path
@@ -215,12 +203,24 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
         request.get("http://#{state.workerId}/app-file/#{req.params.project}/#{req.params.instance}/#{req.params.service}?path=#{req.query.path}")
         .pipe(res)
 
-  app.get '/worker-info', (req, res) ->
+  app.get '/worker/info', (req, res) ->
     res.json
       workerId: workerId
-      redisHost: "#{redisHost}:#{redisPort}"
       execRunner: execRunner
-      clusterNodes: workerSet.array()
+      rethinkdb:
+        host: redisHost
+        port: redisPort
+
+  app.post '/worker/execute', (req, res) ->
+    work = req.body
+    console.log 'Execute work:', work
+    x -= 1
+    child_process.exec "#{execRunner} \"#{work.itemOfWork.work.cmd}\"", (err, stdout, stderr) ->
+      console.log 'work done: ', err, stdout, stderr
+      work.state = 'running'
+      db.updateWork work
+    res.writeHead 202
+    res.end()
 
   server = app.listen http_port, ->
     host = server.address().address
