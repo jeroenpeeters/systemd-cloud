@@ -36,10 +36,13 @@ module.exports = (host, port, workerId) ->
     @work().get(id).then cb
 
   findWorkByName: (project, instance, cb) ->
-    @work().filter(itemOfWork: {project: project, instance: instance}).then cb
+    @work().filter(itemOfWork: {project: project, instance: instance}).run cb
 
   updateWork: (value) ->
     @work().update(value).run()
+
+  changeWorkState: (id, newState) ->
+    @work().get(id).update(data: @r.literal state: newState).run()
 
   newBid: (bid, arbiter, workId, workerId) ->
     @bids().insert({bid: bid, arbiter: arbiter, workId: workId, workerId: workerId}).run()
