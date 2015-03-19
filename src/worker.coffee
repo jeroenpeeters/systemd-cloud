@@ -24,6 +24,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
   db.listenForNewWork (value) ->
     bidder.bidOn value, (bid) ->
+      console.log 'bidding ->', bid
       db.newBid bid, value.auction.arbiter, value.id, workerId
 
   db.listenForBids workerId, (bid) ->
