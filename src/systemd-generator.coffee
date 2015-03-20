@@ -35,4 +35,4 @@ generate = (yaml_text, project, instance) ->
   catch e
     console.log e
 
-generate (fs.readFileSync path.join(__dirname, '../test.yaml')), 'projectName', 'instanceName'
+generate (fs.readFileSync path.join(__dirname, '../defs/libreboard.yaml')), 'innovation', 'libre1'

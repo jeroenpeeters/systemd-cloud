@@ -1,0 +1,13 @@
+name: libreboard
+version: latest
+
+www:
+  image:  ncarlier/libreboard
+  opts:   -e MONGO_URL=mongodb://db:27017/metrello-test -e VIRTUAL_HOST=metrello.home -e ROOT_URL=http://test.ictu/
+  links:
+    - db
+
+db:
+  image:    dockerfile/mongodb
+  volumes:
+    - /data/db
