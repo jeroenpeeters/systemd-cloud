@@ -1,6 +1,7 @@
-sys           = require 'sys'
-child_process = require 'child_process'
+#sys           = require 'sys'
+#child_process = require 'child_process'
 request       = require 'request'
+ssh           = require './control/ssh'
 scriptgen     = require './script-generator'
 
 
@@ -40,15 +41,14 @@ module.exports = (db, bidder, config) ->
   startInstance: (work, cb) ->
     bidder.notifyAboutWork work
     changeWorkState work, 'starting'
-    console.log 'appdef =>', work.itemOfWork.work.appdef
     script = scriptgen.generate work.itemOfWork.work.appdef, work.itemOfWork.project, work.itemOfWork.instance
-    console.log "script =>", script
-
+    ssh.executeScript script, work.itemOfWork.project, work.itemOfWork.instance
+    ###
     child_process.exec "#{config.execRunner} echo \"#{script}\" > #{work.itemOfWork.project}_#{work.itemOfWork.instance}.sh", (err, stdout, stderr) ->
       console.log 'work done: ', err, stdout, stderr
       work.state = 'running'
       db.updateWork work
-
+    ###
 
   stopInstance: (instance, cb) ->
     if instance.state == 'running'

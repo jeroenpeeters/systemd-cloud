@@ -33,14 +33,17 @@ toTopsortArray = (doc) ->
 
 process = (doc, project, instance) ->
   [appName, appVersion] = getNameAndVersion doc
+  services = topsort(toTopsortArray doc).reverse()
   ctx =
     appName: appName
     appVersion: appVersion
     project: project
     instance: instance
     services: []
+    total: services.length
 
-  for service in topsort(toTopsortArray doc).reverse()
+  for service, i in services
+    doc[service].num = i+1
     doc[service].service = service
     doc[service].linkage = dockerLinks ctx, doc[service]
     doc[service].volumesfrom = volumesFrom ctx, doc[service]

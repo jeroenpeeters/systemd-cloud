@@ -1,32 +1,28 @@
-connect = require 'ssh2-connect'
-fs = require 'ssh2-fs'
+connect   = require 'ssh2-connect'
+fs        = require 'ssh2-fs'
 
 # https://github.com/wdavidw/node-ssh2-connect
 opts =
-  host: '10.19.88.57'
-  #port: 22
+  host: '10.19.88.21'
   username: 'core'
-  #password: 'geheim'
   privateKeyPath: '~/.ssh/docker-cluster/id_rsa'
 
-module.exports = ->
+exec = (ssh, cmd, cb) ->
+  ssh.exec cmd, (err, stream) ->
+    if err
+      cb err
+    else
+      buff = ""
+      stream.on 'data', (chunk) -> buff += chunk
+      stream.on 'err', (err) -> cb err
+      stream.on 'end', -> cb null, buff
 
-  connect opts, (err, ssh)->
-    #fs.readdir ssh, 'uploads', (err, files) ->
-    #  console.log err, files
-    #fs.readFile ssh, 'uploads/test.txt', (err, data) ->
-    #  console.log err, data
-    console.log err
-    fs.writeFile ssh, 'writtenByNode.txt', 'Im a file', (err) ->
-      console.log 'written'   if !err
-      console.log err         if err
-      ssh.exec "ls -al | grep writtenBy", (err, stream) ->
-        console.log 'exec', err
-        buff = ""
-        stream.on 'data', (chunk) ->
-          buff += chunk
-        stream.on 'end', ->
-          console.log 'recv', buff
+
+module.exports =
+
+  executeScript: (script, project, instance) ->
+    connect opts, (err, ssh)->
+      fs.writeFile ssh, "#{project}_#{instance}.sh", script, (err) ->
+        exec ssh, "chmod +x #{project}_#{instance}.sh && ./#{project}_#{instance}.sh", (err, res) ->
+          console.log err, res
           ssh.end()
-
-module.exports()
