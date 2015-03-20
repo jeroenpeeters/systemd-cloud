@@ -1,4 +1,4 @@
-r = require('rethinkdbdash') host:'10.19.88.56', port: 28015, db: 'appcluster'
+r = require('rethinkdbdash') host:'10.19.88.57', port: 28015, db: 'appcluster'
 
 handleErr = (msg) -> (err) -> console.log msg, err
 

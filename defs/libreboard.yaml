@@ -11,3 +11,4 @@ db:
   image:    dockerfile/mongodb
   volumes:
     - /data/db
+    - /vol/2

@@ -1,0 +1,44 @@
+etcdctl --peers http://docker1.rni.org:4001 rm /instances/{{project}}/{{appName}}/{{instance}} --recursive
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/state "loading"
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/appName "{{appName}}"
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/appVersion "{{appVersion}}"
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/parameters "{{params}}"
+
+#========================================================
+{{#services}}
+echo "Starting {{image}} for {{service}}-{{../project}}-{{../instance}}"
+
+# remove any left-behind instances
+docker kill {{service}}-{{../project}}-{{../instance}}
+docker rm {{service}}-{{../project}}-{{../instance}}
+
+# pull latest version of the image
+docker pull {{image}}
+
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{../project}}/{{../appName}}/{{../instance}}/meta_/state activating
+
+{{#volumes}}
+mkdir -p /mnt/data/{{../../project}}/{{../../instance}}/{{../service}}{{this}}
+chmod a+rw /mnt/data/{{../../project}}/{{../../instance}}/{{../service}}{{this}}
+{{/volumes}}
+
+{{#links}}
+# wait until linked container {{this}} is available
+while [ -z "$(docker ps | grep "{{this}}-{{../../project}}-{{../../instance}}")" ]; do
+  sleep 5;
+done
+{{/links}}
+
+# start container
+docker run -d --name {{service}}-{{../project}}-{{../instance}} {{linkage}}{{dockervolumes "/mnt/data" ../.}}{{volumesfrom}}{{opts}} -v /etc/localtime:/etc/localtime:ro -P {{image}} {{args}}
+#docker stop -t 30 {{service}}-{{../project}}-{{../instance}}
+
+docker kill publicnetwork-{{service}}-{{../project}}-{{../instance}}
+docker rm publicnetwork-{{service}}-{{../project}}-{{../instance}}
+/opt/bin/create-network-container.sh {{service}}-{{../project}}-{{../instance}} eno1
+/opt/bin/add-route.sh {{service}}-{{../project}}-{{../instance}}
+/opt/bin/create-skydns-entry.sh {{service}}-{{../project}}-{{../instance}} http://docker1.rni.org:4001/v2/keys/skydns/ictu/{{../project}}/{{../instance}}/{{service}}
+/opt/bin/publish-app-info.sh {{service}}-{{../project}}-{{../instance}} http://docker1.rni.org:4001 {{../project}} {{../appName}} {{../appVersion}} {{../instance}} {{service}}
+
+#========================================================
+{{/services}}

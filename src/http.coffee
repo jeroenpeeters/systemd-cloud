@@ -37,7 +37,7 @@ module.exports = (http_port, config, ops) ->
 
   app.post '/start-app/:project/:instance', (req, res) ->
     startApp req, res, ops.createItemOfWork req.params.project,
-      req.params.instance, cmd: req.body
+      req.params.instance, appdef: req.body
 
   app.get '/stop-app/:project/:instance', (req, res) ->
     ops.stop req.params.project, req.params.instance, (err, result) ->
