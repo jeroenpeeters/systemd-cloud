@@ -49,6 +49,10 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
     console.log 'uncaughtException', exception if exception
     db.unregisterNode workerApi, ->
       process.exit()
+    setTimeout ->
+      console.warn '\nUnable to exit cleanly!'
+      process.exit()
+    , 5000
 
   process.on 'SIGINT', onExit.bind null, exit:true
   process.on 'uncaughtException', onExit.bind null, exit:true

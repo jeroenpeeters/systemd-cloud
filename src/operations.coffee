@@ -41,14 +41,9 @@ module.exports = (db, bidder, config) ->
   startInstance: (work, cb) ->
     bidder.notifyAboutWork work
     changeWorkState work, 'starting'
-    script = scriptgen.generate work.itemOfWork.work.appdef, work.itemOfWork.project, work.itemOfWork.instance
-    ssh.executeScript script, work.itemOfWork.project, work.itemOfWork.instance
-    ###
-    child_process.exec "#{config.execRunner} echo \"#{script}\" > #{work.itemOfWork.project}_#{work.itemOfWork.instance}.sh", (err, stdout, stderr) ->
-      console.log 'work done: ', err, stdout, stderr
-      work.state = 'running'
-      db.updateWork work
-    ###
+    [startscript, stopscript] = scriptgen.generate work.itemOfWork.work.appdef, work.itemOfWork.project, work.itemOfWork.instance
+    console.log startscript, stopscript
+    #ssh.executeScript script, work.itemOfWork.project, work.itemOfWork.instance
 
   stopInstance: (instance, cb) ->
     if instance.state == 'running'

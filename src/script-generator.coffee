@@ -5,7 +5,8 @@ topsort     = require 'topsort'
 path        = require 'path'
 fs          = require 'fs'
 
-template = Handlebars.compile("#{fs.readFileSync path.join(__dirname,'../templates/bash.hbs')}")
+starttpl  = Handlebars.compile("#{fs.readFileSync path.join(__dirname,'../templates/bash/start.hbs')}")
+stoptpl   = Handlebars.compile("#{fs.readFileSync path.join(__dirname,'../templates/bash/stop.hbs')}")
 
 Handlebars.registerHelper 'dockervolumes', (rootPath, ctx) ->
   @volumes?.reduce (prev, volume) =>
@@ -48,15 +49,15 @@ process = (doc, project, instance) ->
     doc[service].linkage = dockerLinks ctx, doc[service]
     doc[service].volumesfrom = volumesFrom ctx, doc[service]
     ctx.services.push doc[service]
-
-  template ctx
+  ctx
 
 generate = (yaml_text, project, instance) ->
   try
-    process yaml.safeLoad(yaml_text), project, instance
+    [
+      starttpl process(yaml.safeLoad(yaml_text), project, instance)
+      stoptpl process(yaml.safeLoad(yaml_text), project, instance)
+    ]
   catch e
     console.log e
 
 exports.generate = generate
-
-#generate (fs.readFileSync path.join(__dirname, '../defs/libreboard.yaml')), 'innovation', 'libre1'
