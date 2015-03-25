@@ -31,11 +31,10 @@ done
 
 # start container
 docker run -d --name {{service}}-{{../project}}-{{../instance}} {{linkage}}{{dockervolumes "/mnt/data" ../.}}{{volumesfrom}}{{opts}} -v /etc/localtime:/etc/localtime:ro -P {{image}} {{args}}
-#docker stop -t 30 {{service}}-{{../project}}-{{../instance}}
 
 docker kill publicnetwork-{{service}}-{{../project}}-{{../instance}}
 docker rm publicnetwork-{{service}}-{{../project}}-{{../instance}}
-/opt/bin/create-network-container.sh {{service}}-{{../project}}-{{../instance}} ens160
+/opt/bin/create-network-container.sh {{service}}-{{../project}}-{{../instance}} eno1
 /opt/bin/add-route.sh {{service}}-{{../project}}-{{../instance}}
 /opt/bin/create-skydns-entry.sh {{service}}-{{../project}}-{{../instance}} http://docker1.rni.org:4001/v2/keys/skydns/ictu/{{../project}}/{{../instance}}/{{service}}
 /opt/bin/publish-app-info.sh {{service}}-{{../project}}-{{../instance}} http://docker1.rni.org:4001 {{../project}} {{../appName}} {{../appVersion}} {{../instance}} {{service}}

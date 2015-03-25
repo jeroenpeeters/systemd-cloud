@@ -1,5 +1,5 @@
 Promise   = require 'bluebird'
-connect   = Promise.promisify require 'ssh2-connect'
+connect   = require 'ssh2-connect'
 fs        = require 'ssh2-fs'
 
 # https://github.com/wdavidw/node-ssh2-connect
@@ -8,32 +8,38 @@ opts =
   username: 'core'
   privateKeyPath: '~/.ssh/docker-cluster/id_rsa'
 
-exec = (ssh, cmd, cb) ->
+_exec = (cmd) -> (ssh) -> new Promise (resolve, reject) ->
   ssh.exec cmd, (err, stream) ->
-    if err
-      cb err
+    if err then reject err
     else
       buff = ""
       stream.on 'data', (chunk) -> buff += chunk
-      stream.on 'err', (err) -> cb err
-      stream.on 'end', -> cb null, buff
+      stream.on 'err', (err) -> reject err
+      stream.on 'end', -> resolve buff
 
-_writeFile = (filename, data) -> (ssh) -> return new Promise (resolve, reject) ->
+_connect = (opts) -> new Promise (resolve, reject) ->
+  connect opts, (err, ssh) -> if err then reject err else resolve ssh
+
+_writeFile = (filename, data) -> (ssh) -> new Promise (resolve, reject) ->
   fs.writeFile ssh, filename, data, (err) -> if err then reject err else resolve()
 
-module.exports =
 
-  writeFile: (filename, data) -> new Promise (resolve, reject) ->
-    console.log 'yo'
-    connect(opts).then(-> console.log 'connected!').then(_writeFile filename, data).then resolve
-    .catch reject
+module.exports = sshmod = () ->
 
-  executeScript: (script, project, instance) ->
-    connect opts, (err, ssh)->
-      fs.writeFile ssh, "#{project}_#{instance}.sh", script, (err) ->
-        exec ssh, "chmod +x #{project}_#{instance}.sh && ./#{project}_#{instance}.sh", (err, res) ->
-          console.log err, res
-          ssh.end()
+  sshProm: _connect(opts)
 
-module.exports.writeFile('testfile1', 'imma test').then (a) -> console.log 'ok!', a
-  .catch (e) -> console.log 'nok!', e
+  writeFile: (filename, data) ->
+    @sshProm.then(_writeFile(filename, data))
+
+  execute: (filename) ->
+    @sshProm.then(_exec "chmod +x #{filename}\n./#{filename}")
+
+  writeAndExecute: (filename, data) ->
+    @writeFile(filename, data).then(=> @execute filename)
+    .finally => @end()
+
+  end: ->
+    @sshProm.value()?.end()
+
+ssh = sshmod()
+ssh.writeAndExecute('testfile1', 'echo \'imma test123\'').then (val) -> console.log 'done!', val

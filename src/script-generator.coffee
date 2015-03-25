@@ -13,6 +13,9 @@ Handlebars.registerHelper 'dockervolumes', (rootPath, ctx) ->
     "#{prev}-v #{rootPath}/#{ctx.project}/#{ctx.instance}#{@service}#{volume}:#{volume} "
   , ""
 
+Handlebars.registerHelper 'reverse', (array, options) ->
+  (options.fn x for x in array.reverse()).join ''
+
 getNameAndVersion = (doc) -> [doc.name, doc.version]
 notNameAndVersion = (service) -> service != 'name' and service != 'version'
 
@@ -61,3 +64,10 @@ generate = (yaml_text, project, instance) ->
     console.log e
 
 exports.generate = generate
+
+[start, stop] = generate fs.readFileSync(path.join __dirname,'../defs/libreboard.yaml'), 'innovation', 'libre1'
+
+
+console.log start
+console.log '====================='
+console.log stop

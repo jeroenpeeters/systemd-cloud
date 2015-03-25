@@ -1,0 +1,13 @@
+etcdctl --peers http://docker1.rni.org:4001 set /instances/{{project}}/{{appName}}/{{instance}}/meta_/state "stopping"
+
+{{#reverse services}}
+
+curl -X DELETE http://docker1.rni.org:4001/v2/keys/skydns/ictu/{{../project}}/{{../instance}}/{{service}}
+/opt/bin/delete-route.sh {{service}}-{{../project}}-{{../instance}}
+docker stop -t 5 publicnetwork-{{service}}-{{../project}}-{{../instance}}
+docker rm publicnetwork-{{service}}-{{../project}}-{{../instance}}
+docker stop -t 30 {{service}}-{{../project}}-{{../instance}}
+
+{{/reverse}}
+
+etcdctl --peers http://docker1.rni.org:4001 rm /instances/{{project}}/{{appName}}/{{instance}} --recursive
