@@ -2,12 +2,6 @@ Promise   = require 'bluebird'
 connect   = require 'ssh2-connect'
 fs        = require 'ssh2-fs'
 
-# https://github.com/wdavidw/node-ssh2-connect
-opts =
-  host: '10.19.88.56'
-  username: 'core'
-  privateKeyPath: '~/.ssh/docker-cluster/id_rsa'
-
 _exec = (cmd) -> (ssh) -> new Promise (resolve, reject) ->
   ssh.exec cmd, (err, stream) ->
     if err then reject err
@@ -24,22 +18,46 @@ _writeFile = (filename, data) -> (ssh) -> new Promise (resolve, reject) ->
   fs.writeFile ssh, filename, data, (err) -> if err then reject err else resolve()
 
 
-module.exports = sshmod = () ->
+module.exports = sshmod = (opts, errCallback) ->
+  x = _connect(opts)
 
-  sshProm: _connect(opts)
+  sshProm: x
+  lastprom: x
+
+  $: (cb) -> @lastprom = @lastprom.then(cb).catch @catcher; @;
+  sshConn: (cb) -> =>@sshProm.then cb
+
+  catcher: (err)->
+    if errCallback
+      errCallback err
+    else
+      console.warn "No error callback provided", err
+
+  cmd: (cmd) ->
+    @$ @sshConn _exec cmd
+
+  mkdir: (dir) ->
+    @cmd "mkdir #{dir}"
 
   writeFile: (filename, data) ->
-    @sshProm.then(_writeFile(filename, data))
+    @$ @sshConn _writeFile filename, data
 
   execute: (filename) ->
-    @sshProm.then(_exec "chmod +x #{filename}\n./#{filename}")
+    @$ @sshConn _exec "chmod +x #{filename} && #{filename}"
 
-  writeAndExecute: (filename, data) ->
-    @writeFile(filename, data).then(=> @execute filename)
-    .finally => @end()
+  value: (cb) ->
+    @$ cb
 
   end: ->
-    @sshProm.value()?.end()
+    @$ @sshConn (ssh)-> ssh.end()
 
-ssh = sshmod()
-ssh.writeAndExecute('testfile1', 'echo \'imma test123\'').then (val) -> console.log 'done!', val
+ssh = sshmod
+  host: '10.19.88.21'
+  username: 'core'
+  privateKeyPath: '~/.ssh/docker-cluster/id_rsa'
+  ,(err)-> console.log 'wooj', err
+
+ssh.mkdir('./test').writeFile('./test/file1', 'echo hoi').execute('./test/file1').value(console.log)
+ssh.end()
+
+#ssh.writeAndExecute('testfile1', 'echo \'imma test1234\'').then (val) -> console.log 'done!', val
