@@ -27,7 +27,7 @@ module.exports = (host, port, workerId) ->
           bids: []
         itemOfWork: itemOfWork
         state: 'auctioning'
-      .then (stat)-> cb stat.generated_keys[0] if cb
+      .then (stat)=> @work().get(stat.generated_keys[0]).run cb if cb
 
   removeWork: (id) ->
     @work().get(id).delete().run()
@@ -42,7 +42,7 @@ module.exports = (host, port, workerId) ->
     @work().update(value).run()
 
   changeWorkState: (id, newState) ->
-    @work().get(id).update(data: @r.literal state: newState).run()
+    @work().get(id).update(state: newState).run()
 
   newBid: (bid, arbiter, workId, workerId) ->
     @bids().insert({bid: bid, arbiter: arbiter, workId: workId, workerId: workerId}).run()

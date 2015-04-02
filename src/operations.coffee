@@ -8,10 +8,14 @@ scriptgen     = require './script-generator'
 module.exports = (db, bidder, config) ->
 
   workerId    = config.workerId
-  execRunner  = config.execRunner
+  #!!! >execRunner  = config.execRunner
 
   changeWorkState = (itemOfWork, newState) ->
     db.changeWorkState itemOfWork.id, newState
+
+  testConnectivity: () ->
+    ssh(config.ssh, ((err)-> console.log "SSH Connectivity Check: failed", err))
+    .cmd('whoami').value((whoami) -> console.log "SSH Connectivity Check: whoami? #{whoami}").end()
 
   createItemOfWork: (project, instance, work) ->
     project: project, instance: instance, work: work
@@ -29,8 +33,7 @@ module.exports = (db, bidder, config) ->
       else if result.length > 0
         cb "Instance already exists"
       else
-        db.newWork itemOfWork
-        cb null, "wooi"
+        db.newWork itemOfWork, cb
 
   stop: (project, instance, cb) ->
     @status project, instance, (err, result) =>
@@ -40,19 +43,27 @@ module.exports = (db, bidder, config) ->
 
   startInstance: (work, cb) ->
     bidder.notifyAboutWork work
-    changeWorkState work, 'starting'
-    [startscript, stopscript] = scriptgen.generate work.itemOfWork.work.appdef, work.itemOfWork.project, work.itemOfWork.instance
-    console.log startscript, stopscript
-    #ssh.executeScript script, work.itemOfWork.project, work.itemOfWork.instance
+    changeWorkState work, 'pre-start'
+    [startscript, stopscript] = scriptgen.generate config.network.if, work.itemOfWork.work.appdef, work.itemOfWork.project, work.itemOfWork.instance
+    dir = "./#{work.itemOfWork.project}-#{work.itemOfWork.instance}"
+    conn = ssh(config.ssh)
+    conn.mkdir(dir).writeFile("#{dir}/start.sh", startscript).writeFile("#{dir}/stop.sh", stopscript)
+    conn.value -> changeWorkState work, 'starting'
+    conn.execute("#{dir}/start.sh")
+    conn.end()
+    conn.value -> changeWorkState work, 'running'
 
   stopInstance: (instance, cb) ->
     if instance.state == 'running'
       if instance.auction.winningBid.workerId == workerId
         changeWorkState instance, 'stopping'
-        child_process.exec "#{execRunner} \"cd #{instance.itemOfWork.project}-#{instance.itemOfWork.instance} && ./stop.sh\"", (err, stdout, stderr) ->
-          db.removeWork instance.id
-        cb null, ok: 'true'
+        dir = "./#{instance.itemOfWork.project}-#{instance.itemOfWork.instance}"
+        conn = ssh(config.ssh)
+        conn.execute("#{dir}/stop.sh")
+        conn.end()
+        conn.value -> db.removeWork instance.id
+        cb null, instance
       else
-        cb null, forward: request.get("http://#{instance.auction.winningBid.workerId}/stop-app/#{instance.itemOfWork.project}/#{instance.itemOfWork.instance}")
+        cb null, forward: request.get("http://#{instance.auction.winningBid.workerId}/app/#{instance.itemOfWork.project}/#{instance.itemOfWork.instance}/stop")
     else
       cb error: "Instance cannot be stopped at current state"

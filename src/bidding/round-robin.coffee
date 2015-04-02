@@ -9,3 +9,5 @@ module.exports = ->
   notifyAboutWork: (work) ->
     @bid -= 1   if @bid != 0
     @bid = 1000 if @bid == 0
+
+    console.log 'next bid will be', @bid

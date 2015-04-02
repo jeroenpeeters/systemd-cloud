@@ -43,7 +43,7 @@ module.exports = sshmod = (opts, errCallback) ->
     @$ @sshConn _writeFile filename, data
 
   execute: (filename) ->
-    @$ @sshConn _exec "chmod +x #{filename} && #{filename}"
+    @$ @sshConn _exec "chmod +x #{filename} && #{filename} > #{filename}.log"
 
   value: (cb) ->
     @$ cb
@@ -57,7 +57,5 @@ ssh = sshmod
   privateKeyPath: '~/.ssh/docker-cluster/id_rsa'
   ,(err)-> console.log 'wooj', err
 
-ssh.mkdir('./test').writeFile('./test/file1', 'echo hoi').execute('./test/file1').value(console.log)
-ssh.end()
-
-#ssh.writeAndExecute('testfile1', 'echo \'imma test1234\'').then (val) -> console.log 'done!', val
+#ssh.mkdir('./test').writeFile('./test/file1', 'echo hoi2').execute('./test/file1').value(console.log)
+#ssh.end()

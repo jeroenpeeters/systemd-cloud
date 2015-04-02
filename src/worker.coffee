@@ -8,17 +8,16 @@ httpImpl      = require './http'
 opsImpl       = require './operations'
 roundRobin    = require './bidding/round-robin'
 
-module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
+module.exports = (config) ->
 
-  workerId = workerApi
-  config =
-    workerId: workerId
-    execRunner: execRunner
+  workerId = config.http.public
+  config.workerId = workerId # needs refactoring!
   bidder = roundRobin()
 
-  db = dbImpl redisHost, redisPort, workerApi
+  db = dbImpl config.rethinkdb.host, config.rethinkdb.port, workerId
   ops = opsImpl db, bidder, config
-  http = httpImpl http_port, config, ops
+  ops.testConnectivity()
+  http = httpImpl config, ops
 
   myWork = {}
 
@@ -47,7 +46,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
 
   onExit = (_, exception) ->
     console.log 'uncaughtException', exception if exception
-    db.unregisterNode workerApi, ->
+    db.unregisterNode workerId, ->
       process.exit()
     setTimeout ->
       console.warn '\nUnable to exit cleanly!'
@@ -57,7 +56,7 @@ module.exports = (http_port, redisHost, redisPort, workerApi, execRunner) ->
   process.on 'SIGINT', onExit.bind null, exit:true
   process.on 'uncaughtException', onExit.bind null, exit:true
 
-  db.registerNode workerApi
+  db.registerNode workerId
 
   console.log "Simple CloudEngine v1.0 by @jeroenpeeters"
   console.log "Worker started", config

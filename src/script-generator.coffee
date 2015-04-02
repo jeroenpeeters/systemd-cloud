@@ -35,7 +35,7 @@ toTopsortArray = (doc) ->
       arr.push [service, x]
   arr
 
-process = (doc, project, instance) ->
+process = (doc, nwif, project, instance) ->
   [appName, appVersion] = getNameAndVersion doc
   services = topsort(toTopsortArray doc).reverse()
   ctx =
@@ -45,6 +45,7 @@ process = (doc, project, instance) ->
     instance: instance
     services: []
     total: services.length
+    interface: nwif
 
   for service, i in services
     doc[service].num = i+1
@@ -54,20 +55,18 @@ process = (doc, project, instance) ->
     ctx.services.push doc[service]
   ctx
 
-generate = (yaml_text, project, instance) ->
+generate = (nwif, yaml_text, project, instance) ->
   try
     [
-      starttpl process(yaml.safeLoad(yaml_text), project, instance)
-      stoptpl process(yaml.safeLoad(yaml_text), project, instance)
+      starttpl process(yaml.safeLoad(yaml_text), nwif, project, instance)
+      stoptpl process(yaml.safeLoad(yaml_text), nwif, project, instance)
     ]
   catch e
     console.log e
 
 exports.generate = generate
 
-[start, stop] = generate fs.readFileSync(path.join __dirname,'../defs/libreboard.yaml'), 'innovation', 'libre1'
-
-
-console.log start
-console.log '====================='
-console.log stop
+#[start, stop] = generate fs.readFileSync(path.join __dirname,'../defs/libreboard.yaml'), 'innovation', 'libre1'
+#console.log start
+#console.log '====================='
+#console.log stop

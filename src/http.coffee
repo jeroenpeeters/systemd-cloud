@@ -3,7 +3,7 @@ child_process = require 'child_process'
 express       = require 'express'
 bodyParser    = require 'body-parser'
 
-module.exports = (http_port, config, ops) ->
+module.exports = (config, ops) ->
 
   app = express()
   app.use bodyParser.urlencoded extended: false
@@ -25,21 +25,21 @@ module.exports = (http_port, config, ops) ->
       else
         res.json work
 
-  app.get '/app-state/:project/:instance', (req, res) ->
+  app.get '/app/:project/:instance/info', (req, res) ->
     ops.status req.params.project, req.params.instance, (err, result) ->
       res.status(500).json err      if err
       noSuchInstance req, res       if !err and result == null
       res.json result               if !err and result
 
-  app.get '/start-app/:project/:instance', (req, res) ->
+  app.get '/app/:project/:instance/start', (req, res) ->
     startApp req, res, ops.createItemOfWork req.params.project,
       req.params.instance, cmd: 'echo hello;sleep 10;echo world;'
 
-  app.post '/start-app/:project/:instance', (req, res) ->
+  app.post '/app/:project/:instance/start', (req, res) ->
     startApp req, res, ops.createItemOfWork req.params.project,
       req.params.instance, appdef: req.body
 
-  app.get '/stop-app/:project/:instance', (req, res) ->
+  app.get '/app/:project/:instance/stop', (req, res) ->
     ops.stop req.params.project, req.params.instance, (err, result) ->
       if err
         res.status(400).json err
@@ -71,7 +71,7 @@ module.exports = (http_port, config, ops) ->
     res.writeHead 202
     res.end()
 
-  server = app.listen http_port, ->
+  server = app.listen config.http.port, ->
     host = server.address().address
     port = server.address().port
     console.log 'API listening at http://%s:%s', host, port
